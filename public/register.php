@@ -49,10 +49,23 @@ $flash = getFlash();
         <input type="password" id="password" name="password" placeholder="Min. 8 characters" required minlength="8">
       </div>
       <div class="form-group">
-        <label for="confirm-password">Confirm Password</label>
-        <input type="password" id="confirm-password" name="confirm-password" placeholder="Min. 8 characters" required minlength="8">
+        <label for="confirm_password">Confirm Password</label>
+        <input type="password" id="confirm_password" name="confirm_password" placeholder="Re-enter your password" required minlength="8">
+        <div id="pw-error" style="color:var(--danger);font-size:12px;margin-top:4px;display:none">Passwords do not match.</div>
       </div>
       <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;padding:10px">Create Account</button>
+      <script>
+        (function(){
+          var form = document.querySelector('form');
+          var pw   = document.getElementById('password');
+          var cpw  = document.getElementById('confirm_password');
+          var err  = document.getElementById('pw-error');
+          function check(){ err.style.display = cpw.value && pw.value !== cpw.value ? 'block' : 'none'; }
+          cpw.addEventListener('input', check);
+          pw.addEventListener('input', check);
+          form.addEventListener('submit', function(e){ if(pw.value !== cpw.value){ e.preventDefault(); check(); cpw.focus(); } });
+        })();
+      </script>
       <p style="font-size:11px;color:var(--muted);text-align:center;margin-top:12px">
         By signing up you agree to our <a href="#" style="color:var(--accent)">Terms</a> and <a href="#" style="color:var(--accent)">Privacy Policy</a>.
       </p>
