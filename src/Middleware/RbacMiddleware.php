@@ -1,27 +1,39 @@
 <?php
 
-// src/Middleware/RbacMiddleware.php
+namespace App\Middleware;
+
+use Firebase\JWT\JWT;
+use Firebase\JWT\Key;
+use Psr\Http\Message\ResponseInterface as Response;
+use Psr\Http\Message\ServerRequestInterface as Request;
+use Psr\Http\Server\RequestHandlerInterface as Handler;
+use Slim\Psr7\Response as SlimResponse;
+
 class RbacMiddleware
 {
     private array $permissions = [
-        'owner'  => ['*'],                                    // everything
+        'owner'  => ['*'],
         'admin'  => ['users.*', 'settings.*', 'billing.read'],
         'member' => ['content.*', 'profile.*'],
         'viewer' => ['content.read', 'profile.read'],
     ];
 
-    public function process(Request $request, Handler $next): Response
+    public function __invoke(Request $request, Handler $handler): Response
     {
-        $token    = $this->extractToken($request);
-        $payload  = JWT::decode($token, $this->secret);
-        $role     = $payload->role;
-        $required = $request->getAttribute('permission'); // set per route
+        $payload    = $request->getAttribute('jwt_payload');
+        $role       = $payload->role ?? 'viewer';
+        $required   = $request->getAttribute('permission');
 
-        if (!$this->can($role, $required)) {
-            throw new ForbiddenException("Role '$role' cannot '$required'");
+        if ($required && !$this->can($role, $required)) {
+            $response = new SlimResponse();
+            $response->getBody()->write(json_encode([
+                'status'  => 'error',
+                'message' => "Role '$role' is not allowed to perform '$required'",
+            ]));
+            return $response->withHeader('Content-Type', 'application/json')->withStatus(403);
         }
 
-        return $next->handle($request);
+        return $handler->handle($request);
     }
 
     private function can(string $role, string $permission): bool
@@ -29,8 +41,8 @@ class RbacMiddleware
         $allowed = $this->permissions[$role] ?? [];
         if (in_array('*', $allowed)) return true;
 
-        [$resource, $action] = explode('.', $permission);
-        return in_array($permission, $allowed)
-            || in_array("$resource.*", $allowed);
+        $parts    = explode('.', $permission);
+        $resource = $parts[0];
+        return in_array($permission, $allowed) || in_array("$resource.*", $allowed);
     }
 }

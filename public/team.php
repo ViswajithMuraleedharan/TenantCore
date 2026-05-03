@@ -1,7 +1,29 @@
 <?php
 require_once __DIR__ . '/helpers.php';
+requireAuth();
+
+require_once __DIR__ . '/../vendor/autoload.php';
+$dotenv = Dotenv\Dotenv::createImmutable(__DIR__ . '/../');
+$dotenv->load();
+require_once __DIR__ . '/../config/database.php';
+
+use Illuminate\Database\Capsule\Manager as DB;
+
+$payload  = json_decode(base64_decode(strtr(explode('.', $_SESSION['access_token'])[1], '-_', '+/')), true);
+$tenantId = $payload['tenant_id'];
+$myRole   = $payload['role'];
+
+$members = DB::table('tenant_users')
+    ->join('users', 'users.id', '=', 'tenant_users.user_id')
+    ->where('tenant_users.tenant_id', $tenantId)
+    ->select(['users.id', 'users.name', 'users.email', 'tenant_users.role', 'tenant_users.joined_at'])
+    ->get();
+
 $title      = 'Team';
 $activePage = 'team';
+
+$roleBadge   = ['owner'=>'badge-blue','admin'=>'badge-blue','member'=>'badge-green','viewer'=>'badge-gray'];
+$canInvite   = in_array($myRole, ['owner', 'admin']);
 
 ob_start(); ?>
 
@@ -10,10 +32,12 @@ ob_start(); ?>
     <div class="page-title">Team</div>
     <div class="page-subtitle">Manage members and their roles.</div>
   </div>
-  <button class="btn btn-primary" onclick="document.getElementById('invite-modal').style.display='flex'">
-    <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-    Invite Member
-  </button>
+  <?php if ($canInvite): ?>
+    <button class="btn btn-primary" onclick="document.getElementById('invite-modal').style.display='flex'">
+      <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      Invite Member
+    </button>
+  <?php endif ?>
 </div>
 
 <div class="section">
@@ -21,48 +45,48 @@ ob_start(); ?>
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>Member</th><th>Role</th><th>Status</th><th>Joined</th><th></th></tr>
+          <tr><th>Member</th><th>Role</th><th>Joined</th><?= $canInvite ? '<th></th>' : '' ?></tr>
         </thead>
         <tbody>
-          <?php
-          $members = [
-            ['Jane Smith',    'jane@example.com',  'admin',  'active',  'Jan 1, 2024'],
-            ['Bob Johnson',   'bob@example.com',   'member', 'active',  'Feb 12, 2024'],
-            ['Carol White',   'carol@example.com', 'member', 'pending', 'Mar 5, 2024'],
-            ['Dave Brown',    'dave@example.com',  'viewer', 'active',  'Apr 20, 2024'],
-          ];
-          $roleBadge   = ['admin'=>'badge-blue','member'=>'badge-green','viewer'=>'badge-gray'];
-          $statusBadge = ['active'=>'badge-green','pending'=>'badge-yellow'];
-          foreach ($members as $m):
-            $initials = strtoupper(substr($m[0],0,1) . (strpos($m[0],' ') ? substr($m[0], strpos($m[0],' ')+1, 1) : ''));
-          ?>
-            <tr>
-              <td>
-                <div style="display:flex;align-items:center;gap:10px">
-                  <div class="avatar" style="width:32px;height:32px;font-size:12px"><?= e($initials) ?></div>
-                  <div>
-                    <div style="font-weight:600"><?= e($m[0]) ?></div>
-                    <div style="font-size:12px;color:var(--muted)"><?= e($m[1]) ?></div>
+          <?php if ($members->isEmpty()): ?>
+            <tr><td colspan="4" style="text-align:center;color:var(--muted);padding:24px">No members yet</td></tr>
+          <?php else: ?>
+            <?php foreach ($members as $m):
+              $initials = strtoupper(substr($m->name ?? $m->email, 0, 1) . (strpos($m->name ?? '', ' ') ? substr($m->name, strpos($m->name,' ')+1, 1) : ''));
+            ?>
+              <tr>
+                <td>
+                  <div style="display:flex;align-items:center;gap:10px">
+                    <div class="avatar" style="width:32px;height:32px;font-size:12px"><?= e($initials) ?></div>
+                    <div>
+                      <div style="font-weight:600"><?= e($m->name ?? '—') ?></div>
+                      <div style="font-size:12px;color:var(--muted)"><?= e($m->email) ?></div>
+                    </div>
                   </div>
-                </div>
-              </td>
-              <td><span class="badge <?= $roleBadge[$m[2]] ?>"><?= e(ucfirst($m[2])) ?></span></td>
-              <td><span class="badge <?= $statusBadge[$m[3]] ?>"><?= e(ucfirst($m[3])) ?></span></td>
-              <td style="color:var(--muted)"><?= e($m[4]) ?></td>
-              <td>
-                <div style="display:flex;gap:6px;justify-content:flex-end">
-                  <button class="btn btn-outline btn-sm">Edit</button>
-                  <button class="btn btn-danger btn-sm">Remove</button>
-                </div>
-              </td>
-            </tr>
-          <?php endforeach ?>
+                </td>
+                <td><span class="badge <?= $roleBadge[$m->role] ?? 'badge-gray' ?>"><?= e(ucfirst($m->role)) ?></span></td>
+                <td style="color:var(--muted)"><?= e($m->joined_at ? date('M j, Y', strtotime($m->joined_at)) : '—') ?></td>
+                <?php if ($canInvite): ?>
+                  <td>
+                    <form method="POST" action="/remove-member.php" style="display:inline">
+                      <?= csrfField() ?>
+                      <input type="hidden" name="user_id" value="<?= e($m->id) ?>">
+                      <button type="submit" class="btn btn-danger btn-sm"
+                        onclick="return confirm('Remove this member?')"
+                        <?= $m->role === 'owner' ? 'disabled' : '' ?>>Remove</button>
+                    </form>
+                  </td>
+                <?php endif ?>
+              </tr>
+            <?php endforeach ?>
+          <?php endif ?>
         </tbody>
       </table>
     </div>
   </div>
 </div>
 
+<?php if ($canInvite): ?>
 <!-- Invite Modal -->
 <div id="invite-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:200;align-items:center;justify-content:center">
   <div class="card" style="width:100%;max-width:420px;position:relative">
@@ -83,10 +107,11 @@ ob_start(); ?>
           <option value="viewer">Viewer</option>
         </select>
       </div>
-      <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center">Send Invitation</button>
+      <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center">Add Member</button>
     </form>
   </div>
 </div>
+<?php endif ?>
 
 <?php
 $content = ob_get_clean();

@@ -1,29 +1,30 @@
 <?php
 
-// src/Middleware/TenantMiddleware.php
+namespace App\Middleware;
+
+use Illuminate\Database\Capsule\Manager as DB;
+use Psr\Http\Message\ResponseInterface as Response;
+use Psr\Http\Message\ServerRequestInterface as Request;
+use Psr\Http\Server\RequestHandlerInterface as Handler;
+use Slim\Psr7\Response as SlimResponse;
+
 class TenantMiddleware
 {
-    public function process(Request $request, Handler $next): Response
+    public function __invoke(Request $request, Handler $handler): Response
     {
         $payload  = $request->getAttribute('jwt_payload');
-        $tenant   = $this->tenants->findById($payload->tenant_id);
+        $tenant   = DB::table('tenants')->where('id', $payload->tenant_id)->first();
 
         if (!$tenant || $tenant->status !== 'active') {
-            throw new TenantSuspendedException();
+            $response = new SlimResponse();
+            $response->getBody()->write(json_encode([
+                'status'  => 'error',
+                'message' => 'Workspace is suspended or not found',
+            ]));
+            return $response->withHeader('Content-Type', 'application/json')->withStatus(403);
         }
 
-        // Inject tenant into request for downstream use
         $request = $request->withAttribute('tenant', $tenant);
-        return $next->handle($request);
-    }
-}
-
-// src/Repositories/BaseRepository.php — scopes every query
-abstract class BaseRepository
-{
-    protected function scopedQuery(): Builder
-    {
-        $tenantId = app('tenant')->id;  // or from container
-        return $this->model->where('tenant_id', $tenantId);
+        return $handler->handle($request);
     }
 }
